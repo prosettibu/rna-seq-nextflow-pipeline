@@ -1,0 +1,207 @@
+---
+title: "project2"
+output: html_document
+date: "2025-10-22"
+---
+Introduction:
+
+Methods:
+
+
+```
+
+## Multiqc report:
+
+A Multiqc post-alignment quality report was generated on the STAR-aligned Fastqc read samples simultaneously.
+ This report featured paired-end sequencing of three control samples and three experimental samples, 
+ for a total of twelve FastQC files, all aligned to a referenced genome in STAR, that were submitted into Multiqc. 
+The STAR alignment scores were all high quality, with >95% of every sample being aligned and all having a mismatch
+rate of 0.2%. 
+The mean quality Phred scores are all in green and high quality for the samples, but the per base sequence content failed 
+on all of the Read 1's of the samples, and had a warning on all Read 2's. These issues are likely not to worry, as they 
+only appear at the beginnings of the reads. The GC content, however is right around 50%, which is a quality result.
+The sequence duplication levels showed failure across the samples and a high level of duplicates, which is expected for 
+this experiment since it is seemingly measuring the same cell type. Overall, I do not see any metric of obvious worry,
+given the parameters of this experiment. 
+
+
+
+```{r}
+library(DESeq2)
+library(readr)
+library(tidyverse)
+BiocManager::install("fgsea")
+
+```
+
+```{r}
+cts <- as.matrix(read.csv("results/counts_matrix.csv", row.names="gene"))
+
+```
+
+```{r}
+
+before <- nrow(cts) 
+filter_cts <- cts[rowSums(cts) >= 10, , drop = FALSE]
+after <- nrow(filter_cts)
+
+```
+```{r}
+print(before)
+print(after)
+```
+```{r}
+df_before<- as.data.frame(cts)
+df_before$gene <-rownames(df_before)
+df_before_long <-pivot_longer(df_before, cols = -gene,names_to = "sample", values_to ="count") %>%
+  mutate(log2count = log2(count + 1))
+
+df_after <-as.data.frame(filter_cts)
+df_after$gene<- rownames(df_after)
+df_after_long <-pivot_longer(df_after, cols = -gene, names_to = "sample", values_to ="count") %>%
+  mutate(log2count = log2(count + 1))
+
+ggplot(df_before_long, aes(sample, log2count)) + geom_boxplot() + ggtitle("Before filtering")
+ggplot(df_after_long,aes(sample, log2count))+ geom_boxplot()+ ggtitle("After filtering") 
+```
+
+Gene counts with a frequency less than 10 across all 6 samples were filtered out of this data, which is a common RNA-seq filtering strategy since these counts are too small to reveal any information of value. This filtering strategy took the total gene size of 63241 down to 27723, leaving only genes with counts greater than 10. The box plots demonstrate that the filtering technique was successful, with the filtered sample points having a much cleaner distribution compared to the raw sample points that included many genes less than 10 counts total. This was performed using log2count to avoid the large gene counts from skewing the data and spreading out the smaller gene counts more, overall producing a cleaner distrubition represented in the box plots. 
+
+```{r}
+samples <- c('control_rep1','exp_rep3', 'control_rep2',  
+             'exp_rep1',  'control_rep3','exp_rep2')
+
+condition <- factor(c('control', 'exp', 'control','exp', 'control','exp' ))
+
+colData <- data.frame(row.names = samples, condition = condition)
+
+```
+```{r}
+dds<- DESeqDataSetFromMatrix(countData = filter_cts,
+                              colData = colData, design = ~ condition)
+```
+
+
+
+```{r}
+dds <- DESeq(dds)
+res <- results(dds, contrast = c("condition", "exp", "control"))
+
+res_order <- res[order(res$padj), ]
+deseq2_res <- as_tibble(res_order, rownames = 'gene')
+```
+```{r}
+id2name <- read_tsv("results/idgenename.txt", col_names = c("gene", "symbol"))
+
+deseq2_res <- deseq2_res %>% left_join(id2name, by = "gene")
+nrow(deseq2_res)
+pos_res <- deseq2_res %>%
+  filter(padj < 0.001 ) %>%
+  pull(symbol)
+
+length(pos_res)
+summary(deseq2_res$padj)
+
+
+head(deseq2_res[order(deseq2_res$padj), ], 10)
+
+write.table(pos_res, file = "siggenesfile.txt", col.names = FALSE, row.names = FALSE, quote = FALSE)
+
+```
+I performed ENRICHR analysis on the differentiated genes filtered with an adjusted P-value <0.001. This analysis demonstrated that much of the most significant differentially expressed genes in this data were related to various organs throughout an organism, including the lung, pancreas, soft tissue, heart, and neuroendocrine system. This likely reveals that genes involving various systems of the body may be effected by TYK2 KO and its role during pancreatic lineage differentiation. 
+
+
+
+```{r}
+library(pheatmap)
+
+vsd <- vst(dds, blind=FALSE)
+pcaData <- plotPCA(vsd, intgroup = "condition", returnData = TRUE)
+
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+ggplot(pcaData, aes(PC1, PC2, color=condition)) + 
+  geom_point(size=3) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  coord_fixed()
+
+sampleDists <- dist(t(assay(vsd))) 
+library("RColorBrewer")
+sampleDistMatrix <- as.matrix(sampleDists)
+rownames(sampleDistMatrix) <- paste(vsd$condition, sep="-")
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colors)
+
+```
+The PC1 vs PC2 plot demonstrates Control groups grouping together with a similar variance, while two of the experimental samples being grouped together, and the third experimental sample seemingly being an outlier. 
+
+The heatmap demonstrates a similar pattern to the PCA plot, with two of the experimental groups clustering together and having a similar distance, an outlier experimental group, and then the control groups all clustering together in dark shades. 
+
+Given that these two analyses and their plots demonstrate similar patterns, and these patterns have mostly distinct control and experimental groups (with the exception of one experimental group outlier), this experiment seems to have been a success and has determined significant differentiated genes when samples were treated vs. the control samples. 
+```{r}
+library(fgsea)
+
+deseq2_res_ordered <- deseq2_res %>%
+  drop_na(log2FoldChange, symbol) %>%
+  distinct(symbol, .keep_all = TRUE) %>%
+  arrange(desc(log2FoldChange))
+
+rnk_list <- setNames(deseq2_res_ordered$log2FoldChange, deseq2_res_ordered$symbol)
+
+
+pathways <- gmtPathways("results/c2.all.v2025.1.Hs.symbols.gmt.txt")
+fgseaRes <- fgsea(pathways, rnk_list, minSize=15, maxSize=500)
+
+topPathwaysUp <- fgseaRes[ES > 0][head(order(pval), n=10), pathway]
+topPathwaysDown <- fgseaRes[ES < 0][head(order(pval), n=10), pathway]
+topPathways <- c(topPathwaysUp, rev(topPathwaysDown))
+plotGseaTable(pathways[topPathways], rnk_list, fgseaRes, 
+              gseaParam=0.5)
+```
+The fgsea analysis demonstrates the most downregulated and most upregulated pathways with regards to the significant differentiated genes. The output from this run appears to demonstrate that various pathways related to cancer are upregulated in the treatment compared to the control group, and various neural system pathways are downregulated. The upregulated pathways include p53 downstream pathway, cancer invasiveness, and metastatic breast cancer, while the downregulated include reactome neuronal system, ADHD and autism pathways, and synpatic signal transmission. 
+
+Ultimately the ENRICHR analysis demonstrated a wider array of systems involved with the differential expression of the treatment vs. the control, while the fgsea analysis demonstrated specifically upregulating pathways related to cancer, while downregulating neuronal system pathways. The ENRICHR does include neuronal pathways and cell types, including neuronal projection, but I do not see any clear cancer pathway references under the diseases tab. 
+
+```{r}
+
+ggplot(deseq2_res, aes(log2FoldChange, -log10(pvalue),color =ifelse(log2FoldChange >0, "Up","Down"))) +
+  geom_point()+
+  scale_color_manual(values = c("Down" = "blue", "Up" = "red"))
+  
+```
+
+```{r}
+library(stringr)
+
+topPathwaysf3 <- c(topPathwaysUp[1:4], topPathwaysDown[1:4])
+
+plot_df <-fgseaRes %>%
+  filter(pathway %in% topPathwaysf3) %>%
+  mutate(direction= ifelse(ES > 0, "Upregulated", "Downregulated")) %>%
+  rowwise() %>%
+  mutate(
+    pct_DE =(length(intersect(pathways[[pathway]],deseq2_res_ordered$symbol)) / length(pathways[[pathway]])) *100,
+    pathway_short = str_sub(pathway, 1, 30) 
+  ) %>%
+  ungroup()
+
+ggplot(plot_df, aes(x =reorder(pathway_short, pct_DE), y =pct_DE,fill = padj)) +
+  geom_col() +
+  facet_wrap(~direction,scales="free_x") +
+  coord_flip()+
+  scale_fill_gradient(low = "blue", high = "red") +
+  labs(x =NULL,y = "Percentage of DE genes in category /
+all genes in category (%)",fill ="Adj p-value") +
+  theme_minimal()+
+  theme(axis.text.y = element_text(size = 4))  
+```
+I decided to show the four top gene pathways that were upregulated and downregulated, with a color scale showing the P-value. This figure demonstrates that the most upregulated gene pathways appear to be related to P53 and cancer. The most downregulated genes appear to have to do with neural connections and the neuronal system. Since the gene pathways here are just the highest percentages of DE gene pathways, these percentages are much higher than the ones chosen in the provided paper, which are all around 10%-20%. 
+
+p
+-write intro, methods, results
+-reread and correct overall report

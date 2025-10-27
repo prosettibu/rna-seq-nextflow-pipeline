@@ -5,9 +5,12 @@ date: "2025-10-22"
 ---
 Introduction:
 
+Loss-of-function mutations in the tyrosine kinase 2 gene has been associated with an incresed risk of type-1 diabetes Wildtype tyrosine kinase 2 and knockout version of a genome were studied to observe the impact this gene has on the immune system response and bodily function overall. Knockout testing is a common approach in bioinformatics to study the impact of mis/non-function of a gene, through intentionally removing this gene from samples. 
+
 Methods:
+Three paired end control reads and three paired end sample reads of RNA were collected and ran through FastQC v0.12.1 to observe the quality of these samples.
 
-
+A reference genome from NCBI was indexed and aligned to the sample genomes with STAR 2.7.10. The count of expressed genes was obtained through VERSE 0.1.6 which, had an output that was manipulated for further analysis using Python 3.12.2. Differential expressoion analysis was performed on these samples using DESEQ2 1.40.0 and R 4.3.1. 
 ```
 
 ## Multiqc report:
@@ -96,7 +99,8 @@ id2name <- read_tsv("results/idgenename.txt", col_names = c("gene", "symbol"))
 deseq2_res <- deseq2_res %>% left_join(id2name, by = "gene")
 nrow(deseq2_res)
 pos_res <- deseq2_res %>%
-  filter(padj < 0.001 ) %>%
+  filter(padj < 2.4e-12
+) %>%
   pull(symbol)
 
 length(pos_res)
@@ -105,10 +109,10 @@ summary(deseq2_res$padj)
 
 head(deseq2_res[order(deseq2_res$padj), ], 10)
 
-write.table(pos_res, file = "siggenesfile.txt", col.names = FALSE, row.names = FALSE, quote = FALSE)
+write.table(pos_res, file = "genesfile.txt", col.names = FALSE, row.names = FALSE, quote = FALSE)
 
 ```
-I performed ENRICHR analysis on the differentiated genes filtered with an adjusted P-value <0.001. This analysis demonstrated that much of the most significant differentially expressed genes in this data were related to various organs throughout an organism, including the lung, pancreas, soft tissue, heart, and neuroendocrine system. This likely reveals that genes involving various systems of the body may be effected by TYK2 KO and its role during pancreatic lineage differentiation. 
+I performed ENRICHR analysis on the differentiated genes filtered with an adjusted P-value <0.001. This analysis demonstrated that much of the most nificant differentially expressed genes in this data were related to various organs throughout an organism, including the lung, pancreas, soft tissue, heart, and neuroendocrine system. This likely reveals that genes involving various systems of the body may be effected by TYK2 KO and its role during pancreatic lineage differentiation. 
 
 
 
@@ -142,7 +146,7 @@ The PC1 vs PC2 plot demonstrates Control groups grouping together with a similar
 
 The heatmap demonstrates a similar pattern to the PCA plot, with two of the experimental groups clustering together and having a similar distance, an outlier experimental group, and then the control groups all clustering together in dark shades. 
 
-Given that these two analyses and their plots demonstrate similar patterns, and these patterns have mostly distinct control and experimental groups (with the exception of one experimental group outlier), this experiment seems to have been a success and has determined significant differentiated genes when samples were treated vs. the control samples. 
+Given that these two analyses and their plots demonstrate similar patterns, and these patterns have mostly distinct control and experimental groups (with the exception of one experimental group outlier), this experiment seems to have been a success and has determined nificant differentiated genes when samples were treated vs. the control samples. 
 ```{r}
 library(fgsea)
 
@@ -163,7 +167,7 @@ topPathways <- c(topPathwaysUp, rev(topPathwaysDown))
 plotGseaTable(pathways[topPathways], rnk_list, fgseaRes, 
               gseaParam=0.5)
 ```
-The fgsea analysis demonstrates the most downregulated and most upregulated pathways with regards to the significant differentiated genes. The output from this run appears to demonstrate that various pathways related to cancer are upregulated in the treatment compared to the control group, and various neural system pathways are downregulated. The upregulated pathways include p53 downstream pathway, cancer invasiveness, and metastatic breast cancer, while the downregulated include reactome neuronal system, ADHD and autism pathways, and synpatic signal transmission. 
+The fgsea analysis demonstrates the most downregulated and most upregulated pathways with regards to the nificant differentiated genes. The output from this run appears to demonstrate that various pathways related to cancer are upregulated in the treatment compared to the control group, and various neural system pathways are downregulated. The upregulated pathways include p53 downstream pathway, cancer invasiveness, and metastatic breast cancer, while the downregulated include reactome neuronal system, ADHD and autism pathways, and synpatic nal transmission. 
 
 Ultimately the ENRICHR analysis demonstrated a wider array of systems involved with the differential expression of the treatment vs. the control, while the fgsea analysis demonstrated specifically upregulating pathways related to cancer, while downregulating neuronal system pathways. The ENRICHR does include neuronal pathways and cell types, including neuronal projection, but I do not see any clear cancer pathway references under the diseases tab. 
 
@@ -200,8 +204,20 @@ all genes in category (%)",fill ="Adj p-value") +
   theme_minimal()+
   theme(axis.text.y = element_text(size = 4))  
 ```
-I decided to show the four top gene pathways that were upregulated and downregulated, with a color scale showing the P-value. This figure demonstrates that the most upregulated gene pathways appear to be related to P53 and cancer. The most downregulated genes appear to have to do with neural connections and the neuronal system. Since the gene pathways here are just the highest percentages of DE gene pathways, these percentages are much higher than the ones chosen in the provided paper, which are all around 10%-20%. 
+I decided to show the four top gene pathways that were upregulated and downregulated, with a color scale showing the P-value. This figure demonstrates that the most upregulated gene pathways appear to be related to P53 and cancer. The most downregulated genes appear to have to do with neural connections and the neuronal system. Since the gene pathways here are just the highest percentages of DE gene pathways, these percentages are much higher than the ones chosen in the provided paper, which are all around 10%-20%. I differed from the paper on choosing how to compare the gene pathways and just chose the pathways with the highest percentages, instead of choosing specific pathways as the paper does. 
+```{r}
+testsig<- 2.4e-12
 
-p
--write intro, methods, results
--reread and correct overall report
+sig_list <- deseq2_res %>%
+  filter(!is.na(padj) & padj <testsig)
+
+up_sigs <- sig_list %>% filter(log2FoldChange > 0) %>% nrow()
+down_sigs <-sig_list %>% filter(log2FoldChange < 0) %>% nrow()
+
+cat("Up-regulated:", up_sigs,"\n")
+cat("Down-regulated:", down_sigs,"\n")
+```
+The provided paper observed 319 upregulated and 412 downregulated genes. With my runs, I had only observed 24 upregulated and 21 downregulated genes at a significant threshold of padj=2.4E-12. 
+
+-write intro, methods
+
